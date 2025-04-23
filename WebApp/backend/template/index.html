@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <title>Gaze Demo (WebSocket)</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: sans-serif;
+      background: #111;
+      color: #eee;
+    }
+
+    #view {
+      display: block;
+      margin: 0 auto;
+      max-width: 100%;
+    }
+
+    #status {
+      text-align: center;
+      margin-top: 8px;
+      font-size: 1.1rem;
+    }
+
+    #video {
+      display: none;
+    }
+  </style>
+</head><!-- in template/index.html -->
+
+<body>
+  <video id="video" playsinline autoplay></video>
+  <img id="view" alt="processed frame will appear here">
+  <div id="status">initialising …</div>
+
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <script>
+    const video = document.getElementById('video');
+    const view = document.getElementById('view');
+    const status = document.getElementById('status');
+
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+
+    let processing = false;
+    const TARGET_W = 320;   // downscale for speed
+    const TARGET_H = 240;
+    const QUALITY = 0.5;   // 50% JPEG quality
+
+    // open WebSocket
+    const socket = io();
+
+    // start camera
+    navigator.mediaDevices.getUserMedia({ video: true })
+      .then(stream => {
+        video.srcObject = stream;
+        requestAnimationFrame(capture);
+      })
+      .catch(err => status.textContent = 'camera failure: ' + err);
+
+    function capture() {
+      if (!processing && video.readyState >= 2) {
+        processing = true;
+
+        // draw downscaled & mirrored frame
+        canvas.width = TARGET_W;
+        canvas.height = TARGET_H;
+        ctx.save();
+        ctx.translate(TARGET_W, 0);
+        ctx.scale(-1, 1);
+        ctx.drawImage(video, 0, 0, TARGET_W, TARGET_H);
+        ctx.restore();
+
+        // send base64 over WebSocket
+        const b64 = canvas.toDataURL('image/jpeg', QUALITY);
+        socket.emit('frame', b64);
+      }
+      requestAnimationFrame(capture);
+    }
+
+    // handle server response
+    socket.on('processed', ({ image, gaze }) => {
+      view.src = image;
+      status.textContent = 'Gaze: ' + gaze;
+      processing = false;
+    });
+  </script>
+</body>
+
+</html>

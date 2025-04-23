@@ -1,0 +1,9 @@
+
+services:
+  gaze-backend:
+    build:
+      context: ./backend
+    container_name: backend
+    ports:
+      - "4150:4150"
+    restart: unless-stopped
