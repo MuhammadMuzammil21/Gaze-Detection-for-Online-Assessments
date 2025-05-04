@@ -5,6 +5,8 @@ import { Input } from "@/components/ui/input"
 import { Loader2 } from "lucide-react"
 import { toast } from "sonner"
 import Timer from "@/components/Timer"
+import WebcamPreview from "@/components/ui/WebcamPreview"
+
 
 export default function App() {
   const [file, setFile] = useState<File | null>(null)
@@ -126,7 +128,8 @@ export default function App() {
           </CardContent>
         </Card>
       </div>
-    </main>
+      </main>
+      <WebcamPreview />
     </div>
   )
 }
