@@ -1,104 +1,118 @@
-import cv2
+# backend/utils/gaze_detector.py
+
+import cv2, torch, pickle
 import numpy as np
+from PIL import Image
+from torchvision import transforms
+from models.model import GazeEstimationModel
 import mediapipe as mp
-import time
-import base64
+
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+MODEL_PATH = "models/gaze_model_final.pth"
+SCALERS_PATH = "models/scalers.pkl"
+
+with open(SCALERS_PATH, "rb") as f:
+    scalers = pickle.load(f)
+    landmark_scaler = scalers["landmark_scaler"]
+    pose_scaler = scalers["pose_scaler"]
+
+model = GazeEstimationModel().to(DEVICE)
+model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE))
+model.eval()
+
+transform = transforms.Compose([
+    transforms.Resize((224, 224)),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+])
 
 mp_face_mesh = mp.solutions.face_mesh
-face_mesh = mp_face_mesh.FaceMesh(
-    max_num_faces=1,
-    refine_landmarks=True,
-    min_detection_confidence=0.5,
-    min_tracking_confidence=0.5
-)
+face_mesh = mp_face_mesh.FaceMesh(refine_landmarks=True)
 
-LEFT_EYE   = [362, 385, 387, 263, 373, 380]
-RIGHT_EYE  = [33, 160, 158, 133, 153, 144]
-GAZE_THRESHOLD   = 0.30
-DISTRACTION_TIME = 2.0
-MIRRORED_FEED    = True
+# Constants
+LANDMARKS = [33, 133, 263, 362, 61, 291]
+PNP_POINTS = [1, 152, 33, 263, 61, 291]
+MODEL_POINTS = np.array([
+    (0.0, 0.0, 0.0),
+    (0.0, -330.0, -65.0),
+    (-225.0, 170.0, -135.0),
+    (225.0, 170.0, -135.0),
+    (-150.0, -150.0, -125.0),
+    (150.0, -150.0, -125.0)
+], dtype=np.float64)
 
-last_center_time = time.time()
-alerted          = False
+GAZE_THRESHOLD = 0.6
+YAW_THRESH = 25
+PITCH_THRESH = 20
 
-def _eye_center(pts: np.ndarray) -> np.ndarray:
-    return np.array([pts[:, 0].mean(), pts[:, 1].mean()])
+def process_frame(frame: np.ndarray):
+    h, w = frame.shape[:2]
+    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    result = face_mesh.process(rgb)
+    distracted = False
+    gaze_vector = [0, 0, 1]  # Default forward
 
-def _gaze_ratio(pts: np.ndarray, gray: np.ndarray) -> float:
-    mask = np.zeros_like(gray)
-    cv2.fillPoly(mask, [pts], 255)
+    if not result.multi_face_landmarks:
+        _, jpeg = cv2.imencode(".jpg", frame)
+        return jpeg.tobytes(), gaze_vector, distracted
 
-    eye = cv2.bitwise_and(gray, gray, mask=mask)
+    face = result.multi_face_landmarks[0]
+    
+    image_pts = np.array([
+        (face.landmark[i].x * w, face.landmark[i].y * h)
+        for i in PNP_POINTS
+    ], dtype=np.float64)
 
-    min_x, max_x = pts[:, 0].min(), pts[:, 0].max()
-    min_y, max_y = pts[:, 1].min(), pts[:, 1].max()
+    cam_matrix = np.array([[w, 0, w/2], [0, w, h/2], [0, 0, 1]], dtype=np.float64)
+    success, rvec, tvec = cv2.solvePnP(MODEL_POINTS, image_pts, cam_matrix, np.zeros((4, 1)))
+    if not success:
+        _, jpeg = cv2.imencode(".jpg", frame)
+        return jpeg.tobytes(), gaze_vector, distracted
 
-    _, th = cv2.threshold(eye[min_y:max_y, min_x:max_x], 70, 255,
-                          cv2.THRESH_BINARY_INV)
+    rmat, _ = cv2.Rodrigues(rvec)
+    pose_mat = cv2.hconcat((rmat, tvec))
+    _, _, _, _, _, _, angles = cv2.decomposeProjectionMatrix(pose_mat)
+    yaw, pitch, _ = angles.flatten()
 
-    cnt, _ = cv2.findContours(th, cv2.RETR_EXTERNAL,
-                              cv2.CHAIN_APPROX_SIMPLE)
+    if abs(yaw) > YAW_THRESH or abs(pitch) > PITCH_THRESH:
+        distracted = True
 
-    if cnt:
-        M = cv2.moments(max(cnt, key=cv2.contourArea))
-        if M['m00']:
-            cx = int(M['m10'] / M['m00']) + min_x
-            cy = int(M['m01'] / M['m00']) + min_y
-            pupil = np.array([cx, cy])
-        else:
-            pupil = _eye_center(pts)
-    else:
-        pupil = _eye_center(pts)
+    xs = [l.x for l in face.landmark]
+    ys = [l.y for l in face.landmark]
+    xmin, xmax = int(min(xs)*w), int(max(xs)*w)
+    ymin, ymax = int(min(ys)*h), int(max(ys)*h)
+    crop = frame[ymin:ymax, xmin:xmax]
+    if crop.size == 0:
+        _, jpeg = cv2.imencode(".jpg", frame)
+        return jpeg.tobytes(), gaze_vector, distracted
 
-    w = max_x - min_x or 1
-    return (pupil[0] - min_x) / w
+    face_img = Image.fromarray(cv2.cvtColor(crop, cv2.COLOR_BGR2RGB))
+    input_tensor = transform(face_img).unsqueeze(0).to(DEVICE)
 
+    lm_vec = []
+    for i in LANDMARKS:
+        lx = face.landmark[i].x * w - xmin
+        ly = face.landmark[i].y * h - ymin
+        lm_vec.extend([lx / 450.0, ly / 450.0])
+    lm_vec = torch.tensor(
+        landmark_scaler.transform([lm_vec])[0],
+        dtype=torch.float32).unsqueeze(0).to(DEVICE)
 
-def process_frame(frame):
-    """Return an encoded JPEG with green landmarks, gaze direction,
-    and landmark coordinates for optional extra drawing."""
-    global last_center_time, alerted
+    pose_vec = np.hstack([rvec.flatten(), tvec.flatten()])
+    pose_vec = torch.tensor(
+        pose_scaler.transform([pose_vec])[0],
+        dtype=torch.float32).unsqueeze(0).to(DEVICE)
 
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    rgb  = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    H, W, _ = frame.shape
+    with torch.no_grad():
+        gaze = model(input_tensor, lm_vec, pose_vec).cpu().numpy().flatten()
+    gaze_vector = gaze.tolist()
 
-    results   = face_mesh.process(rgb)
-    direction = "None"
-    dots      = []
+    if abs(gaze_vector[0]) > GAZE_THRESHOLD or abs(gaze_vector[1]) > GAZE_THRESHOLD:
+        distracted = True
 
-    if results.multi_face_landmarks:
-        lm = results.multi_face_landmarks[0].landmark
+    center = (int(face.landmark[1].x * w), int(face.landmark[1].y * h))
+    end = (int(center[0] + gaze_vector[0]*150), int(center[1] - gaze_vector[1]*150))
+    cv2.arrowedLine(frame, center, end, (0, 0, 255), 2)
 
-        le = np.array([[int(lm[i].x * W), int(lm[i].y * H)]
-                       for i in LEFT_EYE], dtype=np.int32)
-        re = np.array([[int(lm[i].x * W), int(lm[i].y * H)]
-                       for i in RIGHT_EYE], dtype=np.int32)
-
-        lg = _gaze_ratio(le, gray)
-        rg = _gaze_ratio(re, gray)
-        avg = (lg + rg) / 2.0
-
-        if avg <= 0.5 - GAZE_THRESHOLD:
-            direction = "Right" if MIRRORED_FEED else "Left"
-        elif avg >= 0.5 + GAZE_THRESHOLD:
-            direction = "Left"  if MIRRORED_FEED else "Right"
-        else:
-            direction = "Center"
-
-        if direction != "Center":
-            if time.time() - last_center_time > DISTRACTION_TIME:
-                alerted = True
-        else:
-            last_center_time = time.time()
-            alerted = False
-
-        for (x, y) in np.vstack((le, re)):
-            cv2.circle(frame, (x, y), 3, (0, 255, 0), -1)
-            dots.append({'x': int(x), 'y': int(y)})
-
-    ok, jpeg = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
-    if not ok:
-        raise RuntimeError("JPEG encode failed")
-
-    return jpeg.tobytes(), direction, dots
+    _, jpeg = cv2.imencode(".jpg", frame)
+    return jpeg.tobytes(), gaze_vector, distracted

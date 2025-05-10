@@ -20,4 +20,5 @@ COPY . .
 EXPOSE 4150
 
 # run via the Flask-SocketIO eventlet server
-CMD ["python", "app.py"]
+CMD ["python", "server.py"]
+
