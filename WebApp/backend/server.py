@@ -8,9 +8,10 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 
 DATA_RE = re.compile(r"^data:image/\w+;base64,")
 
-@app.route("/")
-def index():
-    return send_from_directory(app.static_folder, "index.html")
+@app.route('/', defaults={'path': 'index.html'})
+@app.route('/<path:path>')
+def serve_template(path):
+    return send_from_directory(app.static_folder, path)
 
 @socketio.on('frame')
 def handle_frame(b64):
