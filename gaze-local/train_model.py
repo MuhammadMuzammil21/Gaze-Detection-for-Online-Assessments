@@ -3,6 +3,7 @@ from PIL import Image
 import numpy as np
 import torch
 import torch.nn as nn
+import scipy as sio
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 from torchvision.models import resnet18, ResNet18_Weights
@@ -28,11 +29,11 @@ def load_annotations_and_calib(participant_id_str):
     annotation_file = os.path.join(participant_folder, f'{participant_id_str}.txt')
     
     # Screen size (for normalizing original 2D gaze if needed, not primary target)
-    # calib_folder = os.path.join(participant_folder, 'Calibration')
-    # screen_size_file = os.path.join(calib_folder, 'screenSize.mat')
-    # mat = sio.loadmat(screen_size_file)
-    # width_pixel = mat['width_pixel'][0,0]
-    # height_pixel = mat['height_pixel'][0,0]
+    calib_folder = os.path.join(participant_folder, 'Calibration')
+    screen_size_file = os.path.join(calib_folder, 'screenSize.mat')
+    mat = sio.loadmat(screen_size_file)
+    width_pixel = mat['width_pixel'][0,0]
+    height_pixel = mat['height_pixel'][0,0]
 
     data = []
     with open(annotation_file, 'r') as f:
