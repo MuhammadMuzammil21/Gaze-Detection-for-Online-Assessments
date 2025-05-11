@@ -20,7 +20,7 @@ export function useGazeSocket(
     canvasRef.current = canvas
     const ctx = canvas.getContext("2d")
 
-    const socket = io("http://localhost:5000") // Update to backend URL/port if needed
+    const socket = io("http://localhost:4150") // Update to backend URL/port if needed
     socketRef.current = socket
 
     socket.on("processed", ({ image, gaze }) => {
