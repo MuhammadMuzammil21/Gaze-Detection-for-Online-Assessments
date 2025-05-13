@@ -7,7 +7,7 @@ const TARGET_H = 240
 const QUALITY = 0.5
 
 export function useGazeSocket(
-   videoRef: React.RefObject<HTMLVideoElement | null>,
+  videoRef: React.RefObject<HTMLVideoElement | null>,
   onGazeAlert: (gaze: string) => void,
   onFrameProcessed?: (image: string) => void
 ) {
@@ -20,15 +20,17 @@ export function useGazeSocket(
     canvasRef.current = canvas
     const ctx = canvas.getContext("2d")
 
-    const socket = io("http://localhost:4150") // Update to backend URL/port if needed
+    const socket = io("http://localhost:4150") // or your ngrok HTTPS URL
     socketRef.current = socket
 
-    socket.on("processed", ({ image, gaze }) => {
+    // ✅ Receive processed image and distraction status
+    socket.on("processed", ({ image, distracted }: { image: string; distracted: boolean }) => {
       if (onFrameProcessed) onFrameProcessed(image)
-      onGazeAlert(gaze)
+      if (distracted) onGazeAlert("distracted")
       processingRef.current = false
     })
 
+    // ✅ Start webcam
     navigator.mediaDevices.getUserMedia({ video: true }).then((stream) => {
       const video = videoRef.current
       if (video) {
@@ -38,6 +40,7 @@ export function useGazeSocket(
       }
     })
 
+    // ✅ Send frame to backend
     function captureFrame() {
       const video = videoRef.current
       if (video && ctx && !processingRef.current && video.readyState >= 2) {
@@ -63,5 +66,5 @@ export function useGazeSocket(
         videoRef.current.srcObject.getTracks().forEach((t) => t.stop())
       }
     }
-  }, [])
+  }, [videoRef, onGazeAlert, onFrameProcessed])
 }
