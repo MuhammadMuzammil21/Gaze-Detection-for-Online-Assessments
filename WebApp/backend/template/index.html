@@ -1,14 +1,84 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Vite + React + TS</title>
-    <script type="module" crossorigin src="/assets/index-BkTi0Jm1.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-sUAI__xF.css">
-  </head>
-  <body>
-    <div id="root"></div>
-  </body>
-</html>
+<head>
+  <meta charset="UTF-8" />
+  <title>FocusTest Portal</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+</head>
+<body class="bg-gray-50 text-gray-900 font-sans">
+
+  <!-- Header -->
+  <header class="flex items-center justify-between px-6 py-4 border-b shadow-sm bg-white">
+    <h1 class="text-3xl font-bold">FocusTest Portal</h1>
+    <span class="text-lg font-medium">Timer: <span id="timer">45:30</span></span>
+  </header>
+
+  <!-- Main Section -->
+  <main class="flex flex-col items-center justify-center min-h-screen px-4 py-10">
+
+    <!-- Webcam Feed with Gaze Overlay -->
+    <div class="w-[440px] mb-8">
+      <img id="view" class="rounded shadow-lg mx-auto" alt="Processed frame will appear here" />
+      <div id="status" class="text-center mt-2 text-sm text-gray-600">initialising …</div>
+      <video id="video" playsinline autoplay class="hidden"></video>
+    </div>
+
+    <!-- Upload Card -->
+    <div class="bg-white rounded-lg shadow-lg p-6 w-full max-w-xl">
+      <h2 class="text-lg font-semibold mb-4">Upload Your Answer Sheet</h2>
+      <div class="border-2 border-dashed border-gray-300 rounded-md p-6 text-center text-gray-400 cursor-pointer hover:bg-gray-50 transition">
+        Drag & Drop your file here or <span class="text-blue-600 hover:underline">Click to Browse</span>
+      </div>
+      <button class="mt-6 w-full bg-black text-white py-2 rounded-md hover:bg-gray-800 transition">Submit</button>
+    </div>
+
+  </main>
+
+  <script>
+    const video = document.getElementById('video');
+    const view = document.getElementById('view');
+    const status = document.getElementById('status');
+
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+
+    let processing = false;
+    const TARGET_W = 440;
+    const TARGET_H = 400;
+    const QUALITY = 0.8;
+
+    const socket = io();
+
+    navigator.mediaDevices.getUserMedia({ video: true })
+      .then(stream => {
+        video.srcObject = stream;
+        requestAnimationFrame(capture);
+      })
+      .catch(err => status.textContent = 'camera failure: ' + err);
+
+    function capture() {
+      if (!processing && video.readyState >= 2) {
+        processing = true;
+
+        canvas.width = TARGET_W;
+        canvas.height = TARGET_H;
+        ctx.save();
+        ctx.translate(TARGET_W, 0);
+        ctx.scale(-1, 1);
+        ctx.drawImage(video, 0, 0, TARGET_W, TARGET_H);
+        ctx.restore();
+
+        const b64 = canvas.toDataURL('image/jpeg', QUALITY);
+        socket.emit('frame', b64);
+      }
+      requestAnimationFrame(capture);
+    }
+
+    socket.on('processed', ({ image, gaze }) => {
+      view.src = image;
+      status.textContent = 'Gaze: ' + gaze;
+      processing = false;
+    });
+  </script>
+</body>
