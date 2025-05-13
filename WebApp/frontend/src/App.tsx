@@ -7,6 +7,14 @@ import { toast } from "sonner"
 import Timer from "@/components/Timer"
 import WebcamPreview from "@/components/ui/WebcamPreview"
 import { useGazeSocket } from "@/hooks/useGazeSocket"
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogHeader,
+  AlertDialogTitle
+} from "@/components/ui/alert-dialog"
+
 
 export default function App() {
   const [file, setFile] = useState<File | null>(null)
@@ -15,6 +23,8 @@ export default function App() {
 
   const videoRef = useRef<HTMLVideoElement>(null)
   const [gazeImage, setGazeImage] = useState<string | null>(null)
+  const [showDistractionAlert, setShowDistractionAlert] = useState(false)
+
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -66,9 +76,9 @@ export default function App() {
 
   const triggerGazeAlert = (gaze: string) => {
     if (gaze === "distracted") {
-      toast.warning("⚠️ You seem distracted. Please stay focused!")
+      setShowDistractionAlert(true)
     }
-  }
+  }  
 
   useGazeSocket(videoRef, triggerGazeAlert, setGazeImage)
 
@@ -120,13 +130,21 @@ export default function App() {
                 )}
               </Button>
 
-              <Button onClick={() => triggerGazeAlert("distracted")} variant="outline" className="w-full">
-                (Demo) Trigger Distraction Alert
-              </Button>
+              <AlertDialog open={showDistractionAlert} onOpenChange={setShowDistractionAlert}>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>⚠️ You seem distracted</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      Please stay focused on the test window. This activity is being monitored.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                </AlertDialogContent>
+              </AlertDialog>
 
-              {gazeImage && (
+
+              {/* {gazeImage && (
                 <img src={gazeImage} alt="Processed frame" className="w-full max-w-md mx-auto rounded shadow" />
-              )}
+              )} */}
             </CardContent>
           </Card>
         </div>
